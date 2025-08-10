@@ -17,8 +17,8 @@ async def create_demo_data():
     print("🚀 Создаем демо данные для Workers System...")
     
     # Подключение к MongoDB
-    client = AsyncIOMotorClient(MONGO_URL)
-    db = client[DB_NAME]
+    mongo_client = AsyncIOMotorClient(MONGO_URL)
+    db = mongo_client[DB_NAME]
     
     try:
         # Проверка подключения
