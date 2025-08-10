@@ -618,7 +618,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = await save_user(update)
     
     # Создаем WebApp кнопку
-    webapp_url = f"http://localhost:3000/webapp?user_id={user_id}"
+    # Telegram WebApp кнопка требует HTTPS URL. Берём из WEBAPP_BASE_URL, иначе отключаем кнопку.
+    webapp_url = None
+    if WEBAPP_BASE_URL and WEBAPP_BASE_URL.startswith("https://"):
+        webapp_url = f"{WEBAPP_BASE_URL.rstrip('/')}/webapp?user_id={user_id}"
     webapp_button = InlineKeyboardButton(
         "🌐 Открыть WebApp", 
         web_app=WebAppInfo(url=webapp_url)
