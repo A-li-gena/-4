@@ -306,7 +306,7 @@ async def create_demo_data():
     for status, count in status_counts.items():
         print(f"   - {status}: {count}")
     
-    client.close()
+    mongo_client.close()
 
 if __name__ == "__main__":
     asyncio.run(create_demo_data())
