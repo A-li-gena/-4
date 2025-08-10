@@ -637,7 +637,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     # Клавиатура с WebApp
-    keyboard = InlineKeyboardMarkup([[webapp_button]])
+    keyboard = InlineKeyboardMarkup([[webapp_button]]) if webapp_url else None
     
     await update.message.reply_text(
         welcome_text,
