@@ -636,22 +636,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Найти работу (грузчик, водитель, такелажник)\n"
         "• Создать задание для исполнителей\n"
         "• Управлять своим профилем\n\n"
-        "Выберите действие из меню или откройте WebApp:"
+        "Выберите действие из меню:"
     )
-    
-    # Клавиатура с WebApp
-    keyboard = InlineKeyboardMarkup([[webapp_button]]) if webapp_url else None
-    
-    # Отправляем приветствие с кнопкой WebApp если доступна
-    if keyboard:
-        await update.message.reply_text(
-            welcome_text,
-            reply_markup=keyboard
-        )
-    else:
-        # Сообщение без WebApp, добавляем подсказку про HTTPS
-        welcome_text += "\n\nℹ️ Для кнопки WebApp нужен HTTPS. Установите переменную среды WEBAPP_BASE_URL (например, https://<ваш-домен>)"
-        await update.message.reply_text(welcome_text)
+
+    # Приветствие без WebApp-кнопки
+    await update.message.reply_text(welcome_text)
 
     # Также отправляем обычную клавиатуру
     await update.message.reply_text(
