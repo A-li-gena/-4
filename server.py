@@ -63,6 +63,7 @@ class TaskType(str, Enum):
 # -----------------------------
 MONGO_URL = os.environ.get("MONGO_URL")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("TOKEN")
+WEBAPP_BASE_URL = os.environ.get("WEBAPP_BASE_URL")  # e.g. https://your-domain.com or https://<tunnel>.ngrok-free.app
 
 # Update database name for the work system
 DB_NAME = os.environ.get("DB_NAME", "workersystem")
