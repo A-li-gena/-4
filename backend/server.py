@@ -653,6 +653,7 @@ async def on_startup():
             )
             telegram_app.add_handler(conv)
             telegram_app.add_handler(CommandHandler("cancel", cancel))
+            telegram_app.add_handler(CommandHandler("profile", show_profile))
 
             await telegram_app.initialize()
             await telegram_app.start()
