@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+
+{% block title %}Рабочие задания - Workers System{% endblock %}
+
+{% block content %}
+<div class="webapp-container">
+    <div class="webapp-header">
+        <h1>Рабочие задания</h1>
+        <div class="tabs-container">
+            <a href="?user_id={{ user_id }}&tab=tasks" class="tab-button {% if active_tab == 'tasks' %}active{% endif %}">📋 Задания</a>
+            <a href="?user_id={{ user_id }}&tab=reminders" class="tab-button {% if active_tab == 'reminders' %}active{% endif %}">⏰ Напоминания</a>
+        </div>
+    </div>
+
+    <div class="content-container">
+        {% if active_tab == 'tasks' %}
+        <div class="section-header">
+            <h2 class="section-title">Мои задания ({{ tasks|length }})</h2>
+            <button onclick="showModal('createTaskModal')" class="add-button">+</button>
+        </div>
+        {% if tasks %}
+            {% for task in tasks %}
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">{{ task.title }}</h3>
+                    <span class="status-badge {% if task.status == 'published' %}status-published{% elif task.status == 'pending' %}status-pending{% elif task.status == 'completed' %}status-completed{% else %}status-default{% endif %}">
+                        {% if task.status == 'published' %}Опубликовано{% elif task.status == 'pending' %}На модерации{% elif task.status == 'completed' %}Выполнено{% else %}Черновик{% endif %}
+                    </span>
+                </div>
+                <div class="card-details">
+                    <div class="card-detail"><span>📍</span><span>{{ task.location }}</span></div>
+                    <div class="card-detail"><span>📅</span><span>{{ task.start_datetime | format_datetime }}</span></div>
+                    <div class="card-detail"><span>⏰</span><span>{{ task.duration_hours }} часов</span></div>
+                    <div class="card-detail"><span>💰</span><span>{{ task.client_price | format_currency }}</span></div>
+                </div>
+                {% if task.requirements %}
+                <div class="card-detail"><span>👥</span>
+                    <span>
+                        {% for req in task.requirements %}
+                        {{ req.count }} {% if req.worker_type == 'loader' %}грузчик{% elif req.worker_type == 'driver' %}водитель{% elif req.worker_type == 'rigger' %}такелажник{% elif req.worker_type == 'cleaner' %}уборщик{% else %}разнорабочий{% endif %}{% if not loop.last %}, {% endif %}
+                        {% endfor %}
+                    </span>
+                </div>
+                {% endif %}
+                <div class="card-description"><p>{{ task.description }}</p></div>
+            </div>
+            {% endfor %}
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-state-icon">📋</div>
+            <p class="empty-state-text">У вас пока нет заданий</p>
+            <button onclick="showModal('createTaskModal')" class="button button-primary">Создать первое задание</button>
+        </div>
+        {% endif %}
+        {% elif active_tab == 'reminders' %}
+        <div class="section-header">
+            <h2 class="section-title">Напоминания ({{ reminders|length }})</h2>
+            <button onclick="showModal('createReminderModal')" class="add-button">+</button>
+        </div>
+        {% if reminders %}
+            {% for reminder in reminders %}
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">{{ reminder.title }}</h3>
+                    <span class="status-badge {% if reminder.is_sent %}status-default{% else %}status-published{% endif %}">{% if reminder.is_sent %}Отправлено{% else %}Активно{% endif %}</span>
+                </div>
+                <div class="card-details">
+                    <div class="card-detail"><span>⏰</span><span>{{ reminder.remind_at | format_datetime }}</span></div>
+                </div>
+                {% if reminder.description %}
+                <div class="card-description"><p>{{ reminder.description }}</p></div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-state-icon">⏰</div>
+            <p class="empty-state-text">У вас нет напоминаний</p>
+            <button onclick="showModal('createReminderModal')" class="button button-primary">Добавить напоминание</button>
+        </div>
+        {% endif %}
+        {% endif %}
+    </div>
+</div>
+
+<!-- Create Task Modal -->
+<div id="createTaskModal" class="modal-overlay" style="display: none;">
+    <div class="modal">
+        <h2 class="modal-title">Создать задание</h2>
+        
+        <form id="createTaskForm" class="form" method="post" action="/api/tasks">
+            <input type="hidden" name="client_id" value="{{ user_id }}">
+            
+            <div class="form-group">
+                <label class="form-label">Название задания</label>
+                <input type="text" required class="form-input" name="title" placeholder="Например: Разгрузка мебели">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Описание</label>
+                <textarea required class="form-textarea" name="description" placeholder="Подробное описание задания..."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Тип задания</label>
+                <select class="form-select" name="task_type">
+                    <option value="loading">Погрузка/разгрузка</option>
+                    <option value="moving">Переезд</option>
+                    <option value="cleaning">Уборка</option>
+                    <option value="delivery">Доставка</option>
+                    <option value="assembly">Сборка/разборка</option>
+                    <option value="other">Другое</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Адрес</label>
+                <input type="text" required class="form-input" name="location" placeholder="Адрес выполнения работ">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Дата и время начала</label>
+                <input type="datetime-local" required class="form-input" name="start_datetime">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Продолжительность (часы)</label>
+                <select class="form-select" name="duration_hours">
+                    {% for hour in range(4, 25) %}
+                    <option value="{{ hour }}" {% if hour == 8 %}selected{% endif %}>{{ hour }} часов</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Бюджет (₽)</label>
+                <input type="number" required min="100" class="form-input" name="client_price" placeholder="Сумма за все задание">
+            </div>
+
+            <div class="form-actions">
+                <button type="button" onclick="hideModal('createTaskModal')" class="button button-secondary">Отмена</button>
+                <button type="submit" class="button button-primary">Создать</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Create Reminder Modal -->
+<div id="createReminderModal" class="modal-overlay" style="display: none;">
+    <div class="modal">
+        <h2 class="modal-title">Создать напоминание</h2>
+        
+        <form id="createReminderForm" class="form" method="post" action="/api/reminders">
+            <input type="hidden" name="user_id" value="{{ user_id }}">
+            
+            <div class="form-group">
+                <label class="form-label">Название</label>
+                <input type="text" required class="form-input" name="title" placeholder="О чем напомнить?">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Описание</label>
+                <textarea class="form-textarea" name="description" placeholder="Дополнительная информация"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Дата и время</label>
+                <input type="datetime-local" required class="form-input" name="remind_at">
+            </div>
+
+            <div class="form-actions">
+                <button type="button" onclick="hideModal('createReminderModal')" class="button button-secondary">Отмена</button>
+                <button type="submit" class="button button-primary">Создать</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+if (window.Telegram?.WebApp) {
+    const webApp = window.Telegram.WebApp;
+    webApp.ready();
+    webApp.expand();
+    const activeTab = '{{ active_tab }}';
+    if (activeTab === 'tasks') {
+        webApp.MainButton.setText('Создать задание');
+        webApp.MainButton.show();
+        webApp.MainButton.onClick(() => showModal('createTaskModal'));
+    } else if (activeTab === 'reminders') {
+        webApp.MainButton.setText('Добавить напоминание');
+        webApp.MainButton.show();
+        webApp.MainButton.onClick(() => showModal('createReminderModal'));
+    }
+}
+
+document.getElementById('createTaskForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const formData = serializeForm(this);
+    formData.client_price = parseFloat(formData.client_price);
+    formData.duration_hours = parseInt(formData.duration_hours);
+    formData.requirements = [{ worker_type: 'loader', count: 1 }];
+    try {
+        await api.post('/tasks', formData);
+        hideModal('createTaskModal');
+        if (window.Telegram?.WebApp) {
+            window.Telegram.WebApp.showAlert('Задание создано и отправлено на модерацию!');
+        } else {
+            showSuccess('Задание создано и отправлено на модерацию!');
+        }
+        setTimeout(() => location.reload(), 1000);
+    } catch (error) {
+        if (window.Telegram?.WebApp) {
+            window.Telegram.WebApp.showAlert('Ошибка при создании задания');
+        } else {
+            showError('Ошибка при создании задания: ' + error.message);
+        }
+    }
+});
+
+document.getElementById('createReminderForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const formData = serializeForm(this);
+    try {
+        await api.post('/reminders', formData);
+        hideModal('createReminderModal');
+        if (window.Telegram?.WebApp) {
+            window.Telegram.WebApp.showAlert('Напоминание создано!');
+        } else {
+            showSuccess('Напоминание создано!');
+        }
+        setTimeout(() => location.reload(), 1000);
+    } catch (error) {
+        if (window.Telegram?.WebApp) {
+            window.Telegram.WebApp.showAlert('Ошибка при создании напоминания');
+        } else {
+            showError('Ошибка при создании напоминания: ' + error.message);
+        }
+    }
+});
+</script>
+{% endblock %}

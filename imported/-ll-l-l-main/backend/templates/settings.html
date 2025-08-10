@@ -1,0 +1,105 @@
+{% extends "layout.html" %}
+
+{% block title %}Настройки - Workers System{% endblock %}
+
+{% block page_content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Настройки</h1>
+        <p class="page-subtitle">Конфигурация и мониторинг системы</p>
+    </div>
+    <button onclick="checkHealth()" class="button button-primary" id="checkHealthBtn">
+        <span>🔄</span>
+        Проверить
+    </button>
+</div>
+
+<!-- Health Status -->
+<div class="card">
+    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 24px;">
+        <span style="font-size: 1.5rem;">⚙️</span>
+        <h2 style="margin: 0; font-size: 1.25rem; font-weight: bold; color: #1f2937;">
+            Состояние системы
+        </h2>
+    </div>
+
+    <div id="healthStatus">
+        {% if health %}
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+            <!-- Backend Status -->
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px; background-color: #f9fafb; border-radius: 6px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="font-size: 1.25rem;">🖥️</span>
+                    <div>
+                        <div style="font-weight: 500; color: #1f2937;">Backend API</div>
+                        <div style="font-size: 0.875rem; color: #6b7280;">FastAPI сервер</div>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.25rem;">{{ '✅' if health.ok else '❌' }}</span>
+                    <span style="font-weight: 500; color: {{ '#059669' if health.ok else '#dc2626' }};">
+                        {{ 'Работает' if health.ok else 'Недоступно' }}
+                    </span>
+                </div>
+            </div>
+
+            <!-- Database Status -->
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px; background-color: #f9fafb; border-radius: 6px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="font-size: 1.25rem;">🗄️</span>
+                    <div>
+                        <div style="font-weight: 500; color: #1f2937;">База данных</div>
+                        <div style="font-size: 0.875rem; color: #6b7280;">MongoDB</div>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.25rem;">{{ '✅' if health.db_connected else '❌' }}</span>
+                    <span style="font-weight: 500; color: {{ '#059669' if health.db_connected else '#dc2626' }};">
+                        {{ 'Работает' if health.db_connected else 'Недоступно' }}
+                    </span>
+                </div>
+            </div>
+
+            <!-- System Info -->
+            <div style="margin-top: 24px; padding: 16px; background-color: #f9fafb; border-radius: 6px;">
+                <h3 style="margin: 0 0 8px 0; font-weight: 500; color: #1f2937;">
+                    Информация о системе
+                </h3>
+                <div style="font-size: 0.875rem; color: #6b7280; line-height: 1.5;">
+                    <div>Сервис: {{ health.service }}</div>
+                    <div>Время проверки: {{ health.time | format_datetime }}</div>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="loading">
+            <div class="spinner"></div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+async function checkHealth() {
+    const btn = document.getElementById('checkHealthBtn');
+    const statusContainer = document.getElementById('healthStatus');
+    try {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner" style="width: 16px; height: 16px;"></span> Проверка...';
+        showLoading(statusContainer);
+        await api.get('/health');
+        location.reload();
+    } catch (error) {
+        statusContainer.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 12px; padding: 16px; background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 6px;">
+                <span style="font-size: 1.25rem;">⚠️</span>
+                <span style="color: #dc2626;">Ошибка проверки состояния системы: ${error.message}</span>
+            </div>
+        `;
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>🔄</span> Проверить';
+    }
+}
+</script>
+{% endblock %}
