@@ -1,0 +1,192 @@
+{% extends "layout.html" %}
+
+{% block title %}Пользователи - Workers System{% endblock %}
+
+{% block page_content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Пользователи</h1>
+        <p class="page-subtitle">Управление пользователями системы</p>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="filters">
+    <a href="/users" class="filter-button {% if not current_filter or current_filter == 'all' %}active{% endif %}">
+        Все
+    </a>
+    <a href="/users?role=worker" class="filter-button {% if current_filter == 'worker' %}active{% endif %}">
+        Исполнители
+    </a>
+    <a href="/users?role=client" class="filter-button {% if current_filter == 'client' %}active{% endif %}">
+        Заказчики
+    </a>
+    <a href="/users?role=admin" class="filter-button {% if current_filter == 'admin' %}active{% endif %}">
+        Админы
+    </a>
+    <a href="/users?role=moderator" class="filter-button {% if current_filter == 'moderator' %}active{% endif %}">
+        Модераторы
+    </a>
+</div>
+
+<!-- Users List -->
+{% if users %}
+<div style="margin-bottom: 16px; color: #6b7280; font-size: 0.875rem;">
+    Найдено пользователей: {{ users|length }}
+</div>
+
+{% for user in users %}
+<div class="card">
+    <div class="card-header">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="width: 48px; height: 48px; border-radius: 50%; background-color: #f3f4f6; display: flex; align-items: center; justify-content: center; font-size: 1.5rem;">
+                {% if user.role == 'worker' %}🔧{% elif user.role == 'client' %}👤{% elif user.role == 'admin' %}👑{% else %}⚙️{% endif %}
+            </div>
+            <div>
+                <h3 class="card-title">{{ user.first_name or 'Безымянный' }} {{ user.last_name or '' }}</h3>
+                <p style="margin: 2px 0 0 0; font-size: 0.875rem; color: #6b7280;">
+                    @{{ user.username or 'no_username' }}
+                </p>
+            </div>
+        </div>
+        
+        <div style="display: flex; align-items: center; gap: 8px;">
+            {% set role_info = {
+                'worker': {'label': 'Исполнитель', 'color': '#10b981'},
+                'client': {'label': 'Заказчик', 'color': '#3b82f6'},
+                'admin': {'label': 'Администратор', 'color': '#ef4444'},
+                'moderator': {'label': 'Модератор', 'color': '#f59e0b'}
+            }.get(user.role, {'label': user.role, 'color': '#6b7280'}) %}
+            
+            <span style="padding: 4px 12px; border-radius: 9999px; font-size: 0.75rem; font-weight: bold; background-color: {{ role_info.color }}20; color: {{ role_info.color }};">
+                {{ role_info.label }}
+            </span>
+            
+            {% if user.is_verified %}
+            <span style="padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; background-color: #10b98120; color: #059669;">
+                ✓ Верифицирован
+            </span>
+            {% endif %}
+            
+            {% if not user.is_active %}
+            <span style="padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; background-color: #ef444420; color: #dc2626;">
+                Неактивен
+            </span>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="grid grid-3" style="margin-bottom: 16px;">
+        <div>
+            <span style="font-size: 0.75rem; color: #9ca3af; font-weight: 600;">TELEGRAM ID</span>
+            <div style="font-size: 0.875rem; color: #374151;">{{ user.tg_chat_id }}</div>
+        </div>
+        
+        {% if user.phone %}
+        <div>
+            <span style="font-size: 0.75rem; color: #9ca3af; font-weight: 600;">ТЕЛЕФОН</span>
+            <div style="font-size: 0.875rem; color: #374151;">{{ user.phone }}</div>
+        </div>
+        {% endif %}
+        
+        <div>
+            <span style="font-size: 0.75rem; color: #9ca3af; font-weight: 600;">РЕГИСТРАЦИЯ</span>
+            <div style="font-size: 0.875rem; color: #374151;">{{ user.created_at | format_date }}</div>
+        </div>
+    </div>
+
+    <!-- Worker Profile -->
+    {% if user.role == 'worker' and user.worker_profile %}
+    <div style="padding-top: 16px; border-top: 1px solid #f3f4f6;">
+        <div class="grid grid-3" style="margin-bottom: 12px;">
+            <div>
+                <span style="font-size: 0.75rem; color: #9ca3af; font-weight: 600;">РЕЙТИНГ</span>
+                <div style="font-size: 0.875rem; color: #374151;">
+                    ⭐ {{ "%.1f"|format(user.worker_profile.rating) }}
+                </div>
+            </div>
+            <div>
+                <span style="font-size: 0.75rem; color: #9ca3af; font-weight: 600;">ВЫПОЛНЕНО</span>
+                <div style="font-size: 0.875rem; color: #374151;">
+                    {{ user.worker_profile.completed_tasks }} задач
+                </div>
+            </div>
+            <div>
+                <span style="font-size: 0.75rem; color: #9ca3af; font-weight: 600;">ОТМЕНЕНО</span>
+                <div style="font-size: 0.875rem; color: #374151;">
+                    {{ user.worker_profile.cancelled_tasks }} задач
+                </div>
+            </div>
+        </div>
+        
+        {% if user.worker_profile.worker_types %}
+        <div style="margin-top: 12px;">
+            <span style="font-size: 0.75rem; color: #9ca3af; font-weight: 600;">СПЕЦИАЛИЗАЦИИ</span>
+            <div style="margin-top: 4px;">
+                {% for worker_type in user.worker_profile.worker_types %}
+                <span style="display: inline-block; margin: 2px 8px 2px 0; padding: 2px 8px; background-color: #f3f4f6; border-radius: 4px; font-size: 0.75rem; color: #374151;">
+                    {% if worker_type == 'loader' %}Грузчик{% elif worker_type == 'driver' %}Водитель{% elif worker_type == 'rigger' %}Такелажник{% elif worker_type == 'cleaner' %}Уборщик{% else %}Разнорабочий{% endif %}
+                </span>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if user.worker_profile.on_vacation %}
+        <div style="margin-top: 12px; padding: 8px 12px; background-color: #fef3c7; border-radius: 6px; font-size: 0.875rem; color: #92400e;">
+            🏖️ В отпуске до {{ user.worker_profile.vacation_end | format_date if user.worker_profile.vacation_end else 'не указано' }}
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Client Profile -->
+    {% if user.role == 'client' and user.client_profile %}
+    <div style="padding-top: 16px; border-top: 1px solid #f3f4f6;">
+        <div class="grid grid-4">
+            {% if user.client_profile.company_name %}
+            <div>
+                <span style="font-size: 0.75rem; color: #9ca3af; font-weight: 600;">КОМПАНИЯ</span>
+                <div style="font-size: 0.875rem; color: #374151;">
+                    {{ user.client_profile.company_name }}
+                </div>
+            </div>
+            {% endif %}
+            <div>
+                <span style="font-size: 0.75rem; color: #9ca3af; font-weight: 600;">РЕЙТИНГ</span>
+                <div style="font-size: 0.875rem; color: #374151;">
+                    ⭐ {{ "%.1f"|format(user.client_profile.rating) }}
+                </div>
+            </div>
+            <div>
+                <span style="font-size: 0.75rem; color: #9ca3af; font-weight: 600;">ЗАКАЗОВ</span>
+                <div style="font-size: 0.875rem; color: #374151;">
+                    {{ user.client_profile.total_orders }}
+                </div>
+            </div>
+            <div>
+                <span style="font-size: 0.75rem; color: #9ca3af; font-weight: 600;">ПОТРАЧЕНО</span>
+                <div style="font-size: 0.875rem; color: #374151;">
+                    {{ user.client_profile.total_spent | format_currency }}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endfor %}
+
+{% else %}
+<div class="empty-state">
+    <div class="empty-state-icon">👥</div>
+    <h3>Пользователи не найдены</h3>
+    <p>
+        {% if current_filter and current_filter != 'all' %}
+            Нет пользователей с ролью "{{ current_filter }}"
+        {% else %}
+            В системе пока нет пользователей
+        {% endif %}
+    </p>
+</div>
+{% endif %}
+{% endblock %}
