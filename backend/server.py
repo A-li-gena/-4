@@ -5,6 +5,9 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict
 import logging
 
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
+
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
@@ -801,7 +804,6 @@ async def on_startup():
 
             await telegram_app.initialize()
             await telegram_app.start()
-            # For v21, prefer run_polling in standalone; here we just start and do not block
             logger.info("🤖 Telegram bot initialized")
         except Exception as e:
             logger.error(f"Telegram bot init failed: {e}")
