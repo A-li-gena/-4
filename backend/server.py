@@ -9,11 +9,8 @@ import json
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
-from fastapi import FastAPI, APIRouter, HTTPException, Query, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from enum import Enum
 
@@ -66,17 +63,14 @@ class TaskType(str, Enum):
 # Config & Globals
 # -----------------------------
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("TOKEN")
-WEBAPP_BASE_URL = os.environ.get("WEBAPP_BASE_URL")  # HTTPS URL for Telegram WebApp button
-
-DB_NAME = os.environ.get("DB_NAME", "workersystem")  # оставлено для совместимости, но MongoDB НЕ используется
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 USERS_FILE = os.path.join(DATA_DIR, "users.json")
 TASKS_FILE = os.path.join(DATA_DIR, "tasks.json")
 REMINDERS_FILE = os.path.join(DATA_DIR, "reminders.json")
 
-# FastAPI app
-app = FastAPI(title="Workers System Backend (No MongoDB)")
+# FastAPI app (только API для здоровья/ CRUD, без HTML)
+app = FastAPI(title="Workers Telegram Bot Backend (No HTML)")
 
 # CORS
 app.add_middleware(
@@ -87,50 +81,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Templates and Static
-TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
-STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
-
-templates = Jinja2Templates(directory=TEMPLATES_DIR)
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
-# Template filters
-
-def format_currency(amount):
-    if amount is None:
-        return "0 ₽"
-    try:
-        return f"{int(amount):,} ₽".replace(",", " ")
-    except Exception:
-        return f"{amount} ₽"
-
-def format_datetime(date_str):
-    if not date_str:
-        return ""
-    try:
-        dt = datetime.fromisoformat(str(date_str).replace('Z', '+00:00'))
-        return dt.strftime('%d.%m.%Y %H:%M')
-    except Exception:
-        return str(date_str)
-
-def format_date(date_str):
-    if not date_str:
-        return ""
-    try:
-        dt = datetime.fromisoformat(str(date_str).replace('Z', '+00:00'))
-        return dt.strftime('%d.%m.%Y')
-    except Exception:
-        return str(date_str)
-
-templates.env.filters["format_currency"] = format_currency
-templates.env.filters["format_datetime"] = format_datetime
-templates.env.filters["format_date"] = format_date
-
 # API router (all routes must be under /api)
 api = APIRouter(prefix="/api")
 
 # -----------------------------
-# Simple JSON Storage (in place of MongoDB)
+# Simple JSON Storage (in place of DB)
 # -----------------------------
 class JsonStorage:
     def __init__(self, path: str):
@@ -321,24 +276,18 @@ async def health():
     return {
         "ok": True,
         "service": "backend",
-        "db_connected": False,  # MongoDB не используется
+        "db_connected": False,
         "storage": st,
         "time": datetime.now(timezone.utc).isoformat(),
     }
 
-# Users
 @api.get("/users", response_model=List[UserOut])
-async def list_users_api(
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    role: Optional[UserRole] = None,
-):
+async def list_users_api(limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0), role: Optional[UserRole] = None):
     users = await users_store.find_many(lambda u: (role is None) or (u.get("role") == role))
     users_sorted = sorted(users, key=lambda x: x.get("created_at", ""), reverse=True)
     sliced = users_sorted[offset: offset + limit]
     return [UserOut(**u) for u in sliced]
 
-# Tasks
 @api.post("/tasks", response_model=TaskOut)
 async def create_task_api(payload: TaskCreate):
     task_id = uuid.uuid4().hex
@@ -368,13 +317,7 @@ async def create_task_api(payload: TaskCreate):
     return TaskOut(**doc)
 
 @api.get("/tasks", response_model=List[TaskOut])
-async def list_tasks_api(
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    status: Optional[TaskStatus] = None,
-    task_type: Optional[TaskType] = None,
-    client_id: Optional[str] = None,
-):
+async def list_tasks_api(limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0), status: Optional[TaskStatus] = None, task_type: Optional[TaskType] = None, client_id: Optional[str] = None):
     def filt(t: Dict[str, Any]):
         if status and t.get("status") != status:
             return False
@@ -407,7 +350,6 @@ async def update_task_api(task_id: str, payload: TaskUpdate):
         await tasks_store.upsert(task_id, current)
     return TaskOut(**current)
 
-# Reminders
 @api.post("/reminders", response_model=ReminderOut)
 async def create_reminder_api(payload: ReminderCreate):
     reminder_id = uuid.uuid4().hex
@@ -470,81 +412,14 @@ async def stats_summary():
 app.include_router(api)
 
 # -----------------------------
-# Frontend HTML Routes
-# -----------------------------
-@app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    try:
-        stats = await stats_summary()
-    except Exception:
-        stats = {}
-    return templates.TemplateResponse("dashboard.html", {"request": request, "stats": stats})
-
-@app.get("/orders", response_class=HTMLResponse)
-async def orders_page(request: Request, status: Optional[str] = None):
-    tasks: List[TaskOut] = []
-    try:
-        if status in {s.value for s in TaskStatus} if status else True:
-            tasks = await list_tasks_api(50, 0, TaskStatus(status) if status else None, None, None)  # type: ignore
-    except Exception as e:
-        logger.warning(f"Orders page fallback: {e}")
-    return templates.TemplateResponse("orders.html", {"request": request, "tasks": tasks, "current_filter": status})
-
-@app.get("/users", response_class=HTMLResponse)
-async def users_page(request: Request, role: Optional[str] = None):
-    users: List[UserOut] = []
-    try:
-        users = await list_users_api(50, 0, UserRole(role) if role else None)  # type: ignore
-    except Exception as e:
-        logger.warning(f"Users page fallback: {e}")
-    return templates.TemplateResponse("users.html", {"request": request, "users": users, "current_filter": role})
-
-@app.get("/moderation", response_class=HTMLResponse)
-async def moderation_page(request: Request):
-    tasks: List[TaskOut] = []
-    try:
-        tasks = await list_tasks_api(50, 0, TaskStatus.PENDING, None, None)  # type: ignore
-    except Exception as e:
-        logger.warning(f"Moderation page fallback: {e}")
-    return templates.TemplateResponse("moderation.html", {"request": request, "tasks": tasks})
-
-@app.get("/settings", response_class=HTMLResponse)
-async def settings_page(request: Request):
-    try:
-        health_info = await health()
-    except Exception:
-        health_info = None
-    return templates.TemplateResponse("settings.html", {"request": request, "health": health_info})
-
-@app.get("/webapp", response_class=HTMLResponse)
-async def webapp_page(request: Request, user_id: str = Query(...), tab: str = Query("tasks")):
-    tasks: List[TaskOut] = []
-    reminders: List[ReminderOut] = []
-    try:
-        if tab == "tasks":
-            tasks = await list_tasks_api(50, 0, None, None, user_id)  # type: ignore
-        elif tab == "reminders":
-            reminders = await list_reminders_api(user_id, 50)  # type: ignore
-    except Exception as e:
-        logger.warning(f"Webapp load error: {e}")
-    return templates.TemplateResponse("webapp.html", {
-        "request": request,
-        "user_id": user_id,
-        "active_tab": tab,
-        "tasks": tasks,
-        "reminders": reminders,
-    })
-
-# -----------------------------
 # Telegram Bot Handlers (Start, Profile, Create Task Conversation)
 # -----------------------------
-MAIN_MENU, TASK_TITLE, TASK_DESC, TASK_LOCATION, TASK_DATETIME, TASK_DURATION, TASK_PRICE, TASK_CONFIRM = range(8)
+MAIN_MENU, TASK_TITLE, TASK_DESC, TASK_LOCATION, TASK_DATETIME, TASK_DURATION, TASK_PRICE = range(7)
 
 MAIN_KEYBOARD = [
     ["📋 Мои задания", "🔍 Поиск заданий"],
     ["➕ Создать задание", "👤 Профиль"],
-    ["⏰ Напоминания", "💬 Поддержка"],
-    ["⚙️ Настройки"],
+    ["⏰ Напоминания", "⚙️ Настройки"],
 ]
 
 async def ensure_user(update: Update, default_role: UserRole = UserRole.WORKER) -> Optional[str]:
@@ -579,11 +454,8 @@ async def ensure_user(update: Update, default_role: UserRole = UserRole.WORKER) 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await ensure_user(update)
-    welcome_text = (
-        "🏢 Добро пожаловать в систему!")
-    await update.message.reply_text(welcome_text)
     await update.message.reply_text(
-        "Основное меню:",
+        "🏢 Добро пожаловать в систему Рабочие! Выберите действие:",
         reply_markup=ReplyKeyboardMarkup(MAIN_KEYBOARD, resize_keyboard=True),
     )
     return MAIN_MENU
@@ -620,10 +492,9 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (update.message.text or "").strip()
     low = text.lower()
-    # Normalize: accept variants without emoji
-    if text == "👤 Профиль" or "профиль" in low or low == "profile":
+    if text == "👤 Профиль" or "профиль" in low:
         return await show_profile(update, context)
-    if text == "➕ Создать задание" or "создать" in low or "новое задание" in low:
+    if text == "➕ Создать задание" or "создать" in low:
         context.user_data.clear()
         await update.message.reply_text("Введите название задания:")
         return TASK_TITLE
@@ -632,7 +503,6 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not user:
             await update.message.reply_text("❌ Пользователь не найден")
             return MAIN_MENU
-        # For client show their tasks, for worker assigned
         def filt(t: Dict[str, Any]):
             if user["role"] == "client":
                 return t.get("client_id") == user["id"]
@@ -649,9 +519,8 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return MAIN_MENU
     if low in {"start", "/start"}:
         return await cmd_start(update, context)
-    # Fallback
     await update.message.reply_text(
-        "Пожалуйста, выберите действие из меню:",
+        "Выберите действие из меню ниже",
         reply_markup=ReplyKeyboardMarkup(MAIN_KEYBOARD, resize_keyboard=True),
     )
     return MAIN_MENU
@@ -675,14 +544,12 @@ async def handle_task_location(update: Update, context: ContextTypes.DEFAULT_TYP
 async def handle_task_datetime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     try:
-        # Accept "YYYY-MM-DD HH:MM"
         from datetime import datetime as _dt
         dt = _dt.strptime(text, "%Y-%m-%d %H:%M")
         context.user_data["start_datetime"] = dt.replace(tzinfo=timezone.utc).isoformat()
     except Exception:
         await update.message.reply_text("Неверный формат. Пример: 2025-03-01 09:00")
         return TASK_DATETIME
-    # Duration keyboard 4..24
     hours = [str(h) for h in range(4, 25)]
     keyboard = [[h for h in hours[i:i+6]] for i in range(0, len(hours), 6)]
     await update.message.reply_text(
@@ -716,7 +583,6 @@ async def handle_task_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Введите положительное число, например 5000")
         return TASK_PRICE
 
-    # Save task to storage
     user = await user_by_tg_chat(update.effective_chat.id)
     if not user:
         await update.message.reply_text("❌ Пользователь не найден")
@@ -764,13 +630,11 @@ telegram_app: Optional[Application] = None
 @app.on_event("startup")
 async def on_startup():
     global telegram_app
-    # load storage
     await users_store.load()
     await tasks_store.load()
     await reminders_store.load()
-    logger.info("✅ JSON storage initialized (MongoDB disabled)")
+    logger.info("✅ JSON storage initialized (No HTML mode)")
 
-    # Telegram Bot - start only if token present
     if TELEGRAM_BOT_TOKEN:
         try:
             telegram_app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
@@ -792,7 +656,7 @@ async def on_startup():
 
             await telegram_app.initialize()
             await telegram_app.start()
-            logger.info("🤖 Telegram bot initialized (no DB)")
+            logger.info("🤖 Telegram bot initialized (polling, no HTML)")
         except Exception as e:
             logger.error(f"Telegram bot init failed: {e}")
 
