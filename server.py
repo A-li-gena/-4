@@ -519,6 +519,8 @@ async def settings_page(request: Request):
     return templates.TemplateResponse("settings.html", {
         "request": request,
         "health": health_info
+    # Если WEBAPP_BASE_URL не задан, позволяем пользователю пользоваться меню без WebApp.
+
     })
 
 @app.get("/webapp", response_class=HTMLResponse)
