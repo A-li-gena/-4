@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from enum import Enum
 
 # Telegram Bot (python-telegram-bot v21+)
-from telegram import Update, ReplyKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, BotCommand
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, ConversationHandler,
     ContextTypes, filters
@@ -174,7 +174,7 @@ class JsonStorage:
     async def delete(self, doc_id: str):
         async with self._lock:
             if doc_id in self._data:
-                del self._data
+                del self._data[doc_id]
                 await self._save_internal()
 
     async def find_many(self, filter_fn=None) -> List[Dict[str, Any]]:
@@ -467,25 +467,6 @@ async def dashboard(request: Request):
     stats = await stats_summary()
     return templates.TemplateResponse("dashboard.html", {"request": request, "stats": stats})
 
-@app.get("/orders", response_class=HTMLResponse)
-async def orders_page(request: Request, status: Optional[str] = None):
-    tasks: List[TaskOut] = await list_tasks_api(100, 0, TaskStatus(status) if status else None, None, None)  # type: ignore
-    return templates.TemplateResponse("orders.html", {"request": request, "tasks": tasks, "current_filter": status})
-
-@app.get("/users", response_class=HTMLResponse)
-async def users_page(request: Request, role: Optional[str] = None):
-    users: List[UserOut] = await list_users_api(100, 0, UserRole(role) if role else None)  # type: ignore
-    return templates.TemplateResponse("users.html", {"request": request, "users": users, "current_filter": role})
-
-@app.get("/moderation", response_class=HTMLResponse)
-async def moderation_page(request: Request):
-    tasks: List[TaskOut] = await list_tasks_api(100, 0, TaskStatus.PENDING, None, None)  # type: ignore
-    return templates.TemplateResponse("moderation.html", {"request": request, "tasks": tasks})
-
-@app.get("/settings", response_class=HTMLResponse)
-async def settings_page(request: Request):
-    return templates.TemplateResponse("settings.html", {"request": request})
-
 # -----------------------------
 # Telegram Bot Handlers (Start, Profile, Create Task Conversation)
 # -----------------------------
@@ -565,6 +546,18 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     await update.message.reply_text(text)
     return MAIN_MENU
+
+async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Лог и мягкий ответ на неизвестные команды
+    txt = update.message.text if update.message else ""
+    logger.info(f"Unknown command/text: {txt}")
+    if txt.startswith('/'):
+        await update.message.reply_text("Неизвестная команда. Нажмите /start")
+    else:
+        await update.message.reply_text(
+            "Выберите действие из меню ниже",
+            reply_markup=ReplyKeyboardMarkup(MAIN_KEYBOARD, resize_keyboard=True),
+        )
 
 async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (update.message.text or "").strip()
@@ -706,6 +699,11 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # -----------------------------
 telegram_app: Optional[Application] = None
 
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logger.exception("Handler error:", exc_info=context.error)
+    if isinstance(update, Update) and update.message:
+        await update.message.reply_text("Произошла ошибка. Нажмите /start")
+
 @app.on_event("startup")
 async def on_startup():
     global telegram_app
@@ -733,9 +731,18 @@ async def on_startup():
             telegram_app.add_handler(conv)
             telegram_app.add_handler(CommandHandler("cancel", cancel))
             telegram_app.add_handler(CommandHandler("profile", show_profile))
+            # Unknown commands fallback
+            telegram_app.add_handler(MessageHandler(filters.COMMAND, unknown_command))
+            telegram_app.add_error_handler(on_error)
 
             await telegram_app.initialize()
             await telegram_app.start()
+            # Set bot commands for the menu
+            await telegram_app.bot.set_my_commands([
+                BotCommand("start", "Главное меню"),
+                BotCommand("profile", "Профиль"),
+                BotCommand("cancel", "Отмена диалога"),
+            ])
             logger.info("🤖 Telegram bot initialized (polling)")
         except Exception as e:
             logger.error(f"Telegram bot init failed: {e}")
@@ -748,4 +755,4 @@ async def on_shutdown():
             await telegram_app.stop()
             logger.info("🤖 Telegram bot stopped")
         except Exception as e:
-            logger.error(f"Error stopping telegram app: {e}")
+            logger.error(f"Error stopping Telegram app: {e}")
