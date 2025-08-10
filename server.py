@@ -76,7 +76,9 @@ COLLECTION_PAYMENTS = "payments"
 app = FastAPI(title="Workers System Python Backend")
 
 # Templates and static files setup
-templates = Jinja2Templates(directory="templates")
+# Templates and static files setup
+TEMPLATES_DIR = "templates" if os.path.isdir("templates") else "."
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 # Mount static files only if directory exists
 import os
