@@ -846,13 +846,9 @@ async def show_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return MAIN_MENU
 
 async def start_create_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "➕ **Создание задания**\n\n"
-        "Для создания задания используйте веб-интерфейс - там удобнее заполнять все поля.\n\n"
-        "Нажмите кнопку 'Открыть WebApp' в главном меню.",
-        parse_mode="Markdown"
-    )
-    return MAIN_MENU
+    context.user_data.clear()
+    await update.message.reply_text("➕ Создаём задание. Введите название задания:")
+    return TASK_TITLE
 
 async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Реализация профиля
