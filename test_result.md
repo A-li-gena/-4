@@ -102,7 +102,7 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: Fix MongoDB and Telegram bot issues in Python-based worker task management system. Setup complete Python frontend using Jinja2 templates and resolve connection problems.
+user_problem_statement: Пользователь сообщает, что приложение на Python 3.13 не запускается. При старте через uvicorn сервер работает, но Telegram бот падает с ошибкой: "Updater.start_polling() got an unexpected keyword argument 'read_timeout'". Нужно исправить код под python-telegram-bot v21+ (убрать неподдерживаемые параметры у updater.start_polling или перейти на run_polling), убедиться что все эндпоинты FastAPI под префиксом /api работают, и чтобы сервер стабильно запускался на Python 3.13.
 
 backend:
   - task: "MongoDB connection setup"
