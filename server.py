@@ -1105,9 +1105,7 @@ async def lifespan(app: FastAPI):
                     
                     await telegram_app.updater.start_polling(
                         allowed_updates=Update.ALL_TYPES,
-                        drop_pending_updates=True,
-                        read_timeout=30,
-                        connect_timeout=30
+                        drop_pending_updates=True
                     )
                     print("[startup] Telegram bot polling started successfully")
                     break
