@@ -1,14 +1,15 @@
 import os
 import uuid
 import asyncio
-from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Dict
+from datetime import datetime, timezone
+from typing import List, Optional, Dict, Any
 import logging
+import json
 
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, Query, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -16,11 +17,8 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from enum import Enum
 
-# Mongo
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase, AsyncIOMotorCollection
-
 # Telegram Bot (python-telegram-bot v21+)
-from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, ConversationHandler,
     ContextTypes, filters
@@ -67,20 +65,18 @@ class TaskType(str, Enum):
 # -----------------------------
 # Config & Globals
 # -----------------------------
-MONGO_URL = os.environ.get("MONGO_URL")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("TOKEN")
 WEBAPP_BASE_URL = os.environ.get("WEBAPP_BASE_URL")  # HTTPS URL for Telegram WebApp button
 
-DB_NAME = os.environ.get("DB_NAME", "workersystem")
-COLLECTION_USERS = "users"
-COLLECTION_TASKS = "tasks"
-COLLECTION_APPLICATIONS = "applications"
-COLLECTION_REMINDERS = "reminders"
-COLLECTION_CHATS = "chats"
-COLLECTION_PAYMENTS = "payments"
+DB_NAME = os.environ.get("DB_NAME", "workersystem")  # оставлено для совместимости, но MongoDB НЕ используется
+
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+USERS_FILE = os.path.join(DATA_DIR, "users.json")
+TASKS_FILE = os.path.join(DATA_DIR, "tasks.json")
+REMINDERS_FILE = os.path.join(DATA_DIR, "reminders.json")
 
 # FastAPI app
-app = FastAPI(title="Workers System Backend")
+app = FastAPI(title="Workers System Backend (No MongoDB)")
 
 # CORS
 app.add_middleware(
@@ -92,8 +88,11 @@ app.add_middleware(
 )
 
 # Templates and Static
-templates = Jinja2Templates(directory="templates")
-app.mount("/static", StaticFiles(directory="static"), name="static")
+TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # Template filters
 
@@ -130,18 +129,69 @@ templates.env.filters["format_date"] = format_date
 # API router (all routes must be under /api)
 api = APIRouter(prefix="/api")
 
-# Mongo globals
-mongo_client: Optional[AsyncIOMotorClient] = None
-db: Optional[AsyncIOMotorDatabase] = None
-users_col: Optional[AsyncIOMotorCollection] = None
-tasks_col: Optional[AsyncIOMotorCollection] = None
-applications_col: Optional[AsyncIOMotorCollection] = None
-reminders_col: Optional[AsyncIOMotorCollection] = None
-chats_col: Optional[AsyncIOMotorCollection] = None
-payments_col: Optional[AsyncIOMotorCollection] = None
+# -----------------------------
+# Simple JSON Storage (in place of MongoDB)
+# -----------------------------
+class JsonStorage:
+    def __init__(self, path: str):
+        self.path = path
+        self._lock = asyncio.Lock()
+        self._data: Dict[str, Dict[str, Any]] = {}
 
-# Telegram Application placeholder
-telegram_app: Optional[Application] = None
+    async def load(self):
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        if not os.path.exists(self.path):
+            await self._save_internal()
+            return
+        try:
+            with open(self.path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+                if isinstance(raw, dict):
+                    self._data = raw
+                else:
+                    self._data = {}
+        except Exception as e:
+            logger.error(f"Failed to load {self.path}: {e}")
+            self._data = {}
+
+    async def _save_internal(self):
+        tmp_path = self.path + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(self._data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, self.path)
+
+    async def save(self):
+        async with self._lock:
+            await self._save_internal()
+
+    async def upsert(self, doc_id: str, doc: Dict[str, Any]):
+        async with self._lock:
+            self._data[doc_id] = doc
+            await self._save_internal()
+
+    async def get(self, doc_id: str) -> Optional[Dict[str, Any]]:
+        return self._data.get(doc_id)
+
+    async def delete(self, doc_id: str):
+        async with self._lock:
+            if doc_id in self._data:
+                del self._data[doc_id]
+                await self._save_internal()
+
+    async def find_many(self, filter_fn=None) -> List[Dict[str, Any]]:
+        if filter_fn is None:
+            return list(self._data.values())
+        return [d for d in self._data.values() if filter_fn(d)]
+
+    async def count(self, filter_fn=None) -> int:
+        if filter_fn is None:
+            return len(self._data)
+        return len(await self.find_many(filter_fn))
+
+# Global storages
+users_store = JsonStorage(USERS_FILE)
+tasks_store = JsonStorage(TASKS_FILE)
+reminders_store = JsonStorage(REMINDERS_FILE)
 
 # -----------------------------
 # Models
@@ -245,63 +295,54 @@ class ReminderOut(BaseModel):
     created_at: str
 
 # -----------------------------
-# Dependencies
+# Helpers around storage
 # -----------------------------
-async def get_users_col() -> AsyncIOMotorCollection:
-    if users_col is None:
-        raise HTTPException(status_code=500, detail="Database is not initialized")
-    return users_col
+async def storage_health() -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "using": "json",
+        "files": {
+            "users": os.path.exists(USERS_FILE),
+            "tasks": os.path.exists(TASKS_FILE),
+            "reminders": os.path.exists(REMINDERS_FILE),
+        },
+    }
 
-async def get_tasks_col() -> AsyncIOMotorCollection:
-    if tasks_col is None:
-        raise HTTPException(status_code=500, detail="Database is not initialized")
-    return tasks_col
-
-async def get_reminders_col() -> AsyncIOMotorCollection:
-    if reminders_col is None:
-        raise HTTPException(status_code=500, detail="Database is not initialized")
-    return reminders_col
+async def user_by_tg_chat(chat_id: int) -> Optional[Dict[str, Any]]:
+    users = await users_store.find_many(lambda u: u.get("tg_chat_id") == chat_id)
+    return users[0] if users else None
 
 # -----------------------------
 # API Routes (/api)
 # -----------------------------
 @api.get("/health")
 async def health():
-    db_connected = False
-    try:
-        if db is not None:
-            await db.command("ping")
-            db_connected = True
-    except Exception as e:
-        logger.error(f"DB ping failed: {e}")
+    st = await storage_health()
     return {
         "ok": True,
         "service": "backend",
-        "db_connected": db_connected,
+        "db_connected": False,  # MongoDB не используется
+        "storage": st,
         "time": datetime.now(timezone.utc).isoformat(),
     }
 
 # Users
 @api.get("/users", response_model=List[UserOut])
-async def list_users(
+async def list_users_api(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     role: Optional[UserRole] = None,
-    col: AsyncIOMotorCollection = Depends(get_users_col),
 ):
-    filter_query = {}
-    if role:
-        filter_query["role"] = role
-    cursor = col.find(filter_query).sort("created_at", -1).skip(offset).limit(limit)
-    results: List[UserOut] = []
-    async for doc in cursor:
-        results.append(UserOut(**doc))
-    return results
+    users = await users_store.find_many(lambda u: (role is None) or (u.get("role") == role))
+    users_sorted = sorted(users, key=lambda x: x.get("created_at", ""), reverse=True)
+    sliced = users_sorted[offset: offset + limit]
+    return [UserOut(**u) for u in sliced]
 
 # Tasks
 @api.post("/tasks", response_model=TaskOut)
-async def create_task(payload: TaskCreate, col: AsyncIOMotorCollection = Depends(get_tasks_col)):
+async def create_task_api(payload: TaskCreate):
     task_id = uuid.uuid4().hex
+    now = datetime.now(timezone.utc).isoformat()
     doc = {
         "id": task_id,
         "title": payload.title,
@@ -320,64 +361,55 @@ async def create_task(payload: TaskCreate, col: AsyncIOMotorCollection = Depends
         "client_id": payload.client_id,
         "assigned_workers": [],
         "applications_count": 0,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": now,
+        "updated_at": now,
     }
-    await col.insert_one(doc)
+    await tasks_store.upsert(task_id, doc)
     return TaskOut(**doc)
 
 @api.get("/tasks", response_model=List[TaskOut])
-async def list_tasks(
+async def list_tasks_api(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     status: Optional[TaskStatus] = None,
     task_type: Optional[TaskType] = None,
     client_id: Optional[str] = None,
-    col: AsyncIOMotorCollection = Depends(get_tasks_col),
 ):
-    filter_query = {}
-    if status:
-        filter_query["status"] = status
-    if task_type:
-        filter_query["task_type"] = task_type
-    if client_id:
-        filter_query["client_id"] = client_id
-    cursor = col.find(filter_query).sort("created_at", -1).skip(offset).limit(limit)
-    results: List[TaskOut] = []
-    async for doc in cursor:
-        results.append(TaskOut(**doc))
-    return results
+    def filt(t: Dict[str, Any]):
+        if status and t.get("status") != status:
+            return False
+        if task_type and t.get("task_type") != task_type:
+            return False
+        if client_id and t.get("client_id") != client_id:
+            return False
+        return True
+    tasks = await tasks_store.find_many(filt)
+    tasks_sorted = sorted(tasks, key=lambda x: x.get("created_at", ""), reverse=True)
+    sliced = tasks_sorted[offset: offset + limit]
+    return [TaskOut(**t) for t in sliced]
 
 @api.get("/tasks/{task_id}", response_model=TaskOut)
-async def get_task(task_id: str, col: AsyncIOMotorCollection = Depends(get_tasks_col)):
-    doc = await col.find_one({"id": task_id})
+async def get_task_api(task_id: str):
+    doc = await tasks_store.get(task_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Task not found")
     return TaskOut(**doc)
 
 @api.patch("/tasks/{task_id}", response_model=TaskOut)
-async def update_task(task_id: str, payload: TaskUpdate, col: AsyncIOMotorCollection = Depends(get_tasks_col)):
-    update_fields = {k: v for k, v in payload.dict().items() if v is not None}
-    if not update_fields:
-        doc = await col.find_one({"id": task_id})
-        if not doc:
-            raise HTTPException(status_code=404, detail="Task not found")
-        return TaskOut(**doc)
-    update_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
-    from pymongo import ReturnDocument
-    res = await col.find_one_and_update({"id": task_id}, {"$set": update_fields}, return_document=ReturnDocument.AFTER)
-    if not res:
-        await col.update_one({"id": task_id}, {"$set": update_fields})
-        res = await col.find_one({"id": task_id})
-    if not res:
+async def update_task_api(task_id: str, payload: TaskUpdate):
+    current = await tasks_store.get(task_id)
+    if not current:
         raise HTTPException(status_code=404, detail="Task not found")
-    return TaskOut(**res)
+    update_fields = {k: v for k, v in payload.dict().items() if v is not None}
+    if update_fields:
+        current.update(update_fields)
+        current["updated_at"] = datetime.now(timezone.utc).isoformat()
+        await tasks_store.upsert(task_id, current)
+    return TaskOut(**current)
 
 # Reminders
 @api.post("/reminders", response_model=ReminderOut)
-async def create_reminder(payload: ReminderCreate):
-    if reminders_col is None:
-        raise HTTPException(status_code=500, detail="Database is not initialized")
+async def create_reminder_api(payload: ReminderCreate):
     reminder_id = uuid.uuid4().hex
     doc = {
         "id": reminder_id,
@@ -389,52 +421,36 @@ async def create_reminder(payload: ReminderCreate):
         "is_sent": False,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    await reminders_col.insert_one(doc)
+    await reminders_store.upsert(reminder_id, doc)
     return ReminderOut(**doc)
 
 @api.get("/reminders", response_model=List[ReminderOut])
-async def list_reminders(user_id: Optional[str] = None, limit: int = Query(50, ge=1, le=200)):
-    if reminders_col is None:
-        raise HTTPException(status_code=500, detail="Database is not initialized")
-    filter_query = {}
-    if user_id:
-        filter_query["user_id"] = user_id
-    cursor = reminders_col.find(filter_query).sort("remind_at", 1).limit(limit)
-    results: List[ReminderOut] = []
-    async for doc in cursor:
-        results.append(ReminderOut(**doc))
-    return results
+async def list_reminders_api(user_id: Optional[str] = None, limit: int = Query(50, ge=1, le=200)):
+    def filt(r: Dict[str, Any]):
+        if user_id and r.get("user_id") != user_id:
+            return False
+        return True
+    rems = await reminders_store.find_many(filt)
+    rems_sorted = sorted(rems, key=lambda x: x.get("remind_at", ""))
+    return [ReminderOut(**r) for r in rems_sorted[:limit]]
 
 @api.get("/stats/summary")
 async def stats_summary():
     try:
-        if not tasks_col or not users_col:
-            return {
-                "total_tasks": 0,
-                "by_status": {},
-                "total_revenue": 0,
-                "total_users": 0,
-                "workers_count": 0,
-                "clients_count": 0,
-            }
-        total_tasks = await tasks_col.count_documents({})
-        by_status = {}
-        for status in TaskStatus:
-            by_status[status.value] = await tasks_col.count_documents({"status": status.value})
-        agg = tasks_col.aggregate([
-            {"$match": {"status": TaskStatus.COMPLETED}},
-            {"$group": {"_id": None, "sum": {"$sum": "$client_price"}}},
-        ])
-        total_revenue = 0
-        async for x in agg:
-            total_revenue = x.get("sum", 0)
-        total_users = await users_col.count_documents({})
-        workers_count = await users_col.count_documents({"role": UserRole.WORKER})
-        clients_count = await users_col.count_documents({"role": UserRole.CLIENT})
+        all_tasks = await tasks_store.find_many()
+        total_tasks = len(all_tasks)
+        by_status: Dict[str, int] = {}
+        for s in TaskStatus:
+            by_status[s.value] = len([t for t in all_tasks if t.get("status") == s])
+        total_revenue = int(sum([t.get("client_price", 0) for t in all_tasks if t.get("status") == TaskStatus.COMPLETED]))
+        all_users = await users_store.find_many()
+        total_users = len(all_users)
+        workers_count = len([u for u in all_users if u.get("role") == UserRole.WORKER])
+        clients_count = len([u for u in all_users if u.get("role") == UserRole.CLIENT])
         return {
             "total_tasks": total_tasks,
             "by_status": by_status,
-            "total_revenue": int(total_revenue),
+            "total_revenue": total_revenue,
             "total_users": total_users,
             "workers_count": workers_count,
             "clients_count": clients_count,
@@ -466,30 +482,28 @@ async def dashboard(request: Request):
 
 @app.get("/orders", response_class=HTMLResponse)
 async def orders_page(request: Request, status: Optional[str] = None):
-    tasks = []
+    tasks: List[TaskOut] = []
     try:
-        if tasks_col:
-            tasks = await list_tasks(50, 0, status, None, None, tasks_col)  # type: ignore
+        if status in {s.value for s in TaskStatus} if status else True:
+            tasks = await list_tasks_api(50, 0, TaskStatus(status) if status else None, None, None)  # type: ignore
     except Exception as e:
         logger.warning(f"Orders page fallback: {e}")
     return templates.TemplateResponse("orders.html", {"request": request, "tasks": tasks, "current_filter": status})
 
 @app.get("/users", response_class=HTMLResponse)
 async def users_page(request: Request, role: Optional[str] = None):
-    users = []
+    users: List[UserOut] = []
     try:
-        if users_col:
-            users = await list_users(50, 0, role, users_col)  # type: ignore
+        users = await list_users_api(50, 0, UserRole(role) if role else None)  # type: ignore
     except Exception as e:
         logger.warning(f"Users page fallback: {e}")
     return templates.TemplateResponse("users.html", {"request": request, "users": users, "current_filter": role})
 
 @app.get("/moderation", response_class=HTMLResponse)
 async def moderation_page(request: Request):
-    tasks = []
+    tasks: List[TaskOut] = []
     try:
-        if tasks_col:
-            tasks = await list_tasks(50, 0, TaskStatus.PENDING, None, None, tasks_col)  # type: ignore
+        tasks = await list_tasks_api(50, 0, TaskStatus.PENDING, None, None)  # type: ignore
     except Exception as e:
         logger.warning(f"Moderation page fallback: {e}")
     return templates.TemplateResponse("moderation.html", {"request": request, "tasks": tasks})
@@ -504,13 +518,13 @@ async def settings_page(request: Request):
 
 @app.get("/webapp", response_class=HTMLResponse)
 async def webapp_page(request: Request, user_id: str = Query(...), tab: str = Query("tasks")):
-    tasks = []
-    reminders = []
+    tasks: List[TaskOut] = []
+    reminders: List[ReminderOut] = []
     try:
-        if tab == "tasks" and tasks_col:
-            tasks = await list_tasks(50, 0, None, None, user_id, tasks_col)  # type: ignore
-        elif tab == "reminders" and reminders_col:
-            reminders = await list_reminders(user_id, 50)  # type: ignore
+        if tab == "tasks":
+            tasks = await list_tasks_api(50, 0, None, None, user_id)  # type: ignore
+        elif tab == "reminders":
+            reminders = await list_reminders_api(user_id, 50)  # type: ignore
     except Exception as e:
         logger.warning(f"Webapp load error: {e}")
     return templates.TemplateResponse("webapp.html", {
@@ -534,19 +548,16 @@ MAIN_KEYBOARD = [
 ]
 
 async def ensure_user(update: Update, default_role: UserRole = UserRole.WORKER) -> Optional[str]:
-    """Create or update user in DB, return user id"""
-    global users_col
-    if users_col is None:
-        return None
     user = update.effective_user
     chat_id = update.effective_chat.id
-    existing = await users_col.find_one({"tg_chat_id": chat_id})
+    existing = await user_by_tg_chat(chat_id)
     if existing:
-        await users_col.update_one({"tg_chat_id": chat_id}, {"$set": {
+        existing.update({
             "username": user.username,
             "first_name": user.first_name,
             "last_name": user.last_name,
-        }})
+        })
+        await users_store.upsert(existing["id"], existing)
         return existing["id"]
     new_id = uuid.uuid4().hex
     doc = {
@@ -563,14 +574,13 @@ async def ensure_user(update: Update, default_role: UserRole = UserRole.WORKER) 
         "client_profile": ClientProfile().dict() if default_role == UserRole.CLIENT else None,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    await users_col.insert_one(doc)
+    await users_store.upsert(new_id, doc)
     return new_id
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = await ensure_user(update)
+    await ensure_user(update)
     welcome_text = (
         "🏢 Добро пожаловать в систему!")
-    # Simple menu
     await update.message.reply_text(welcome_text)
     await update.message.reply_text(
         "Основное меню:",
@@ -579,11 +589,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return MAIN_MENU
 
 async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if users_col is None:
-        await update.message.reply_text("❌ База данных недоступна")
-        return MAIN_MENU
     chat_id = update.effective_chat.id
-    user = await users_col.find_one({"tg_chat_id": chat_id})
+    user = await user_by_tg_chat(chat_id)
     if not user:
         await update.message.reply_text("❌ Профиль не найден")
         return MAIN_MENU
@@ -619,24 +626,22 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Введите название задания:")
         return TASK_TITLE
     if text == "📋 Мои задания":
-        if tasks_col is None or users_col is None:
-            await update.message.reply_text("❌ База данных недоступна")
-            return MAIN_MENU
-        user = await users_col.find_one({"tg_chat_id": update.effective_chat.id})
+        user = await user_by_tg_chat(update.effective_chat.id)
         if not user:
             await update.message.reply_text("❌ Пользователь не найден")
             return MAIN_MENU
         # For client show their tasks, for worker assigned
-        query = {"client_id": user["id"]} if user["role"] == "client" else {"assigned_workers": user["id"]}
-        cursor = tasks_col.find(query).sort("created_at", -1).limit(10)
-        tasks = []
-        async for d in cursor:
-            tasks.append(d)
-        if not tasks:
+        def filt(t: Dict[str, Any]):
+            if user["role"] == "client":
+                return t.get("client_id") == user["id"]
+            return user["id"] in t.get("assigned_workers", [])
+        tasks = await tasks_store.find_many(filt)
+        tasks_sorted = sorted(tasks, key=lambda x: x.get("created_at", ""), reverse=True)[:10]
+        if not tasks_sorted:
             await update.message.reply_text("У вас пока нет заданий")
             return MAIN_MENU
         msg = "📋 Мои задания\n\n"
-        for t in tasks:
+        for t in tasks_sorted:
             msg += f"• {t['title']} — {t.get('status', 'draft')} — {t.get('client_price', 0)}₽\n"
         await update.message.reply_text(msg)
         return MAIN_MENU
@@ -667,7 +672,8 @@ async def handle_task_datetime(update: Update, context: ContextTypes.DEFAULT_TYP
     text = update.message.text.strip()
     try:
         # Accept "YYYY-MM-DD HH:MM"
-        dt = datetime.strptime(text, "%Y-%m-%d %H:%M")
+        from datetime import datetime as _dt
+        dt = _dt.strptime(text, "%Y-%m-%d %H:%M")
         context.user_data["start_datetime"] = dt.replace(tzinfo=timezone.utc).isoformat()
     except Exception:
         await update.message.reply_text("Неверный формат. Пример: 2025-03-01 09:00")
@@ -706,12 +712,8 @@ async def handle_task_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Введите положительное число, например 5000")
         return TASK_PRICE
 
-    # Save task to DB
-    if tasks_col is None or users_col is None:
-        await update.message.reply_text("❌ База данных недоступна")
-        return MAIN_MENU
-
-    user = await users_col.find_one({"tg_chat_id": update.effective_chat.id})
+    # Save task to storage
+    user = await user_by_tg_chat(update.effective_chat.id)
     if not user:
         await update.message.reply_text("❌ Пользователь не найден")
         return MAIN_MENU
@@ -733,7 +735,7 @@ async def handle_task_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     try:
-        await create_task(TaskCreate(**payload), tasks_col)  # type: ignore
+        await create_task_api(TaskCreate(**payload))  # type: ignore
         await update.message.reply_text("✅ Задание создано и отправлено на модерацию!")
     except Exception as e:
         logger.error(f"Create task error: {e}")
@@ -753,36 +755,18 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # -----------------------------
 # Startup & Shutdown
 # -----------------------------
+telegram_app: Optional[Application] = None
+
 @app.on_event("startup")
 async def on_startup():
-    global mongo_client, db, users_col, tasks_col, applications_col, reminders_col, chats_col, payments_col, telegram_app
-    # MongoDB
-    if MONGO_URL:
-        try:
-            mongo_client = AsyncIOMotorClient(MONGO_URL)
-            db = mongo_client[DB_NAME]
-            users_col = db[COLLECTION_USERS]
-            tasks_col = db[COLLECTION_TASKS]
-            applications_col = db[COLLECTION_APPLICATIONS]
-            reminders_col = db[COLLECTION_REMINDERS]
-            chats_col = db[COLLECTION_CHATS]
-            payments_col = db[COLLECTION_PAYMENTS]
-            # Indexes
-            await users_col.create_index("id", unique=True)
-            await users_col.create_index("tg_chat_id", unique=True)
-            await tasks_col.create_index("id", unique=True)
-            await tasks_col.create_index("client_id")
-            await tasks_col.create_index("status")
-            await reminders_col.create_index("id", unique=True)
-            await reminders_col.create_index("user_id")
-            await reminders_col.create_index("remind_at")
-            logger.info("✅ MongoDB connected and indexes ensured")
-        except Exception as e:
-            logger.error(f"MongoDB connection failed: {e}")
-    else:
-        logger.warning("MONGO_URL is not set. Running with limited functionality.")
+    global telegram_app
+    # load storage
+    await users_store.load()
+    await tasks_store.load()
+    await reminders_store.load()
+    logger.info("✅ JSON storage initialized (MongoDB disabled)")
 
-    # Telegram Bot - start only if token present; keep lightweight
+    # Telegram Bot - start only if token present
     if TELEGRAM_BOT_TOKEN:
         try:
             telegram_app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
@@ -804,22 +788,16 @@ async def on_startup():
 
             await telegram_app.initialize()
             await telegram_app.start()
-            logger.info("🤖 Telegram bot initialized")
+            logger.info("🤖 Telegram bot initialized (no DB)")
         except Exception as e:
             logger.error(f"Telegram bot init failed: {e}")
 
 @app.on_event("shutdown")
 async def on_shutdown():
-    global telegram_app, mongo_client
+    global telegram_app
     if telegram_app is not None:
         try:
             await telegram_app.stop()
             logger.info("🤖 Telegram bot stopped")
         except Exception as e:
             logger.error(f"Error stopping telegram app: {e}")
-    if mongo_client is not None:
-        try:
-            mongo_client.close()
-            logger.info("🗄️ MongoDB connection closed")
-        except Exception as e:
-            logger.error(f"Error closing MongoDB: {e}")
