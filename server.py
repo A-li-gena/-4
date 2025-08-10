@@ -551,6 +551,7 @@ async def webapp_page(request: Request, user_id: str = Query(...), tab: str = Qu
 # -----------------------------
 MAIN_MENU, PROFILE, MY_TASKS, SEARCH, TASKS_VIEW, REMINDERS, SETTINGS = range(7)
 CREATE_TASK, TASK_TITLE, TASK_DESC, TASK_TYPE, TASK_LOCATION, TASK_DATETIME, TASK_DURATION, TASK_REQUIREMENTS, TASK_PRICE = range(9, 18)
+TASK_CONFIRM = 18
 
 # Создаем основную клавиатуру
 MAIN_KEYBOARD = [
