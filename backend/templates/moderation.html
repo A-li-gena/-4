@@ -1,0 +1,263 @@
+{% extends "layout.html" %}
+
+{% block title %}Модерация - Workers System{% endblock %}
+
+{% block page_content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">🔍 Модерация заданий</h1>
+        <p class="page-subtitle">Задания ожидающие проверки и одобрения</p>
+    </div>
+    <button onclick="location.reload()" class="button button-primary">
+        <span>🔄</span>
+        Обновить
+    </button>
+</div>
+
+<!-- Stats -->
+<div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 24px;">
+    <div class="stat-card">
+        <div style="font-size: 2rem; margin-bottom: 8px;">⏳</div>
+        <div style="font-size: 0.875rem; color: #6b7280;">На модерации</div>
+        <div style="font-size: 1.5rem; font-weight: bold; color: #f59e0b;">
+            {{ tasks|length }}
+        </div>
+    </div>
+</div>
+
+<!-- Tasks List -->
+{% if tasks %}
+{% for task in tasks %}
+<div class="card" style="border: 2px solid #fbbf24;">
+    <div class="card-header">
+        <div>
+            <h3 class="card-title">{{ task.title }}</h3>
+            <div style="display: flex; align-items: center; gap: 12px; font-size: 0.875rem; color: #6b7280;">
+                <span>📅 {{ task.start_datetime | format_datetime }}</span>
+                <span>⏰ {{ task.duration_hours }}ч</span>
+                <span>📍 {{ task.location }}</span>
+            </div>
+        </div>
+        
+        <div style="display: flex; gap: 8px;">
+            <button onclick="openModerationModal('{{ task.id }}')" class="button button-primary">
+                📝 Модерировать
+            </button>
+            <button onclick="rejectTask('{{ task.id }}')" class="button button-danger">
+                ❌ Отклонить
+            </button>
+        </div>
+    </div>
+
+    <!-- Price Information -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; margin-bottom: 16px; padding: 16px; background-color: #f8fafc; border-radius: 6px;">
+        <div>
+            <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600;">ЦЕНА ЗАКАЗЧИКА</div>
+            <div style="font-size: 1.25rem; font-weight: bold; color: #059669;">
+                {{ task.client_price | format_currency }}
+            </div>
+        </div>
+        <div>
+            <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600;">ВЫПЛАТА ИСПОЛНИТЕЛЯМ</div>
+            <div style="font-size: 1.25rem; font-weight: bold; color: #dc2626;">
+                {{ task.worker_price | format_currency if task.worker_price else 'Не задано' }}
+            </div>
+        </div>
+        <div>
+            <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600;">МАРЖА</div>
+            <div style="font-size: 1.25rem; font-weight: bold; color: #7c3aed;">
+                {{ (task.client_price - (task.worker_price or task.client_price * 0.8)) | format_currency }}
+            </div>
+        </div>
+    </div>
+
+    <!-- Requirements -->
+    {% if task.requirements %}
+    <div style="margin-bottom: 16px;">
+        <div style="font-size: 0.875rem; font-weight: 600; color: #374151; margin-bottom: 8px;">
+            👥 Требования:
+        </div>
+        <div>
+            {% for req in task.requirements %}
+            <span style="display: inline-block; margin: 2px 8px 2px 0; padding: 4px 8px; background-color: #dbeafe; color: #1e40af; border-radius: 4px; font-size: 0.875rem; font-weight: 500;">
+                {{ req.count }} 
+                {% if req.worker_type == 'loader' %}грузчик{% elif req.worker_type == 'driver' %}водитель{% elif req.worker_type == 'rigger' %}такелажник{% elif req.worker_type == 'cleaner' %}уборщик{% else %}разнорабочий{% endif %}
+            </span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Description -->
+    <div class="card-description">
+        <strong>Описание:</strong>
+        <p style="margin: 4px 0 0 0;">{{ task.description }}</p>
+    </div>
+
+    <!-- Additional Info -->
+    {% if task.additional_info %}
+    <div style="margin-top: 12px; padding: 12px; background-color: #eff6ff; border-radius: 6px; border: 1px solid #bfdbfe;">
+        <strong style="font-size: 0.875rem; color: #1e40af;">
+            💬 Дополнительная информация для админов:
+        </strong>
+        <p style="margin: 4px 0 0 0; font-size: 0.875rem; color: #374151;">
+            {{ task.additional_info }}
+        </p>
+    </div>
+    {% endif %}
+
+    <!-- Metadata -->
+    <div style="margin-top: 16px; display: flex; gap: 8px; font-size: 0.75rem; color: #9ca3af;">
+        <span>ID: {{ task.id[:8] }}...</span>
+        <span>•</span>
+        <span>Создано: {{ task.created_at | format_datetime }}</span>
+    </div>
+</div>
+{% endfor %}
+
+{% else %}
+<div class="empty-state">
+    <div class="empty-state-icon">✅</div>
+    <h3>Все задания проверены</h3>
+    <p>В данный момент нет заданий, ожидающих модерации</p>
+</div>
+{% endif %}
+
+<!-- Moderation Modal -->
+<div id="moderationModal" class="modal-overlay" style="display: none;">
+    <div class="modal" style="max-width: 600px; max-height: 90vh;">
+        <h2 class="modal-title">Модерация задания</h2>
+        
+        <form id="moderationForm" class="form ajax-form">
+            <input type="hidden" id="taskId" name="task_id">
+            
+            <div class="form-group">
+                <label class="form-label">Название задания</label>
+                <input type="text" required class="form-input" id="taskTitle" name="title">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Описание</label>
+                <textarea required class="form-textarea" rows="4" id="taskDescription" name="description"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Адрес</label>
+                <input type="text" required class="form-input" id="taskLocation" name="location">
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div class="form-group">
+                    <label class="form-label">Цена для заказчика (₽)</label>
+                    <input type="number" required min="100" class="form-input" id="clientPrice" name="client_price">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Выплата исполнителям (₽)</label>
+                    <input type="number" required min="100" class="form-input" id="workerPrice" name="worker_price">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Продолжительность (часы)</label>
+                <select class="form-select" id="durationHours" name="duration_hours">
+                    {% for hour in range(4, 25) %}
+                    <option value="{{ hour }}">{{ hour }} часов</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Комментарий модератора</label>
+                <textarea class="form-textarea" rows="2" id="moderationNotes" name="moderation_notes" placeholder="Дополнительные комментарии или изменения..."></textarea>
+            </div>
+
+            <div id="additionalInfo" style="display: none; padding: 12px; background-color: #f0f9ff; border-radius: 6px; border: 1px solid #bae6fd; margin-bottom: 16px;">
+                <strong style="color: #0284c7; font-size: 0.875rem;">
+                    Дополнительная информация от заказчика:
+                </strong>
+                <p id="additionalInfoText" style="margin: 4px 0 0 0; font-size: 0.875rem; color: #374151;"></p>
+            </div>
+
+            <div class="form-actions">
+                <button type="button" onclick="hideModal('moderationModal')" class="button button-secondary">
+                    Отмена
+                </button>
+                <button type="submit" class="button button-success">
+                    ✅ Одобрить задание
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+// Moderation functionality
+async function openModerationModal(taskId) {
+    try {
+        const response = await api.get(`/tasks/${taskId}`);
+        const task = response;
+        
+        document.getElementById('taskId').value = task.id;
+        document.getElementById('taskTitle').value = task.title;
+        document.getElementById('taskDescription').value = task.description;
+        document.getElementById('taskLocation').value = task.location;
+        document.getElementById('clientPrice').value = task.client_price;
+        document.getElementById('workerPrice').value = task.worker_price || task.client_price * 0.8;
+        document.getElementById('durationHours').value = task.duration_hours;
+        document.getElementById('moderationNotes').value = '';
+        
+        if (task.additional_info) {
+            document.getElementById('additionalInfo').style.display = 'block';
+            document.getElementById('additionalInfoText').textContent = task.additional_info;
+        } else {
+            document.getElementById('additionalInfo').style.display = 'none';
+        }
+        
+        showModal('moderationModal');
+    } catch (error) {
+        showError('Ошибка загрузки задания: ' + error.message);
+    }
+}
+
+async function rejectTask(taskId) {
+    const reason = prompt('Причина отклонения задания:');
+    if (!reason) return;
+    
+    try {
+        await api.patch(`/tasks/${taskId}`, {
+            status: 'cancelled',
+            moderation_notes: reason
+        });
+        showSuccess('Задание отклонено');
+        setTimeout(() => location.reload(), 1000);
+    } catch (error) {
+        showError('Ошибка при отклонении задания: ' + error.message);
+    }
+}
+
+document.getElementById('moderationForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const formData = serializeForm(this);
+    const taskId = formData.task_id;
+    delete formData.task_id;
+    
+    try {
+        await api.patch(`/tasks/${taskId}`, {
+            ...formData,
+            status: 'approved',
+            client_price: parseFloat(formData.client_price),
+            worker_price: parseFloat(formData.worker_price),
+            duration_hours: parseInt(formData.duration_hours)
+        });
+        
+        showSuccess('Задание одобрено');
+        hideModal('moderationModal');
+        setTimeout(() => location.reload(), 1000);
+    } catch (error) {
+        showError('Ошибка при одобрении задания: ' + error.message);
+    }
+});
+</script>
+{% endblock %}

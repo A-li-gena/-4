@@ -1,0 +1,117 @@
+{% extends "layout.html" %}
+
+{% block title %}Задания - Workers System{% endblock %}
+
+{% block page_content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Задания</h1>
+        <p class="page-subtitle">Управление всеми заданиями в системе</p>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="filters">
+    <a href="/orders" class="filter-button {% if not current_filter or current_filter == 'all' %}active{% endif %}">
+        Все
+    </a>
+    <a href="/orders?status=pending" class="filter-button {% if current_filter == 'pending' %}active{% endif %}">
+        На модерации
+    </a>
+    <a href="/orders?status=published" class="filter-button {% if current_filter == 'published' %}active{% endif %}">
+        Опубликованные
+    </a>
+    <a href="/orders?status=in_progress" class="filter-button {% if current_filter == 'in_progress' %}active{% endif %}">
+        В работе
+    </a>
+    <a href="/orders?status=completed" class="filter-button {% if current_filter == 'completed' %}active{% endif %}">
+        Выполненные
+    </a>
+</div>
+
+<!-- Tasks List -->
+{% if tasks %}
+<div style="margin-bottom: 16px; color: #6b7280; font-size: 0.875rem;">
+    Найдено заданий: {{ tasks|length }}
+</div>
+
+{% for task in tasks %}
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">{{ task.title }}</h3>
+        <span class="status-badge status-{{ task.status }}">
+            {% set status_labels = {
+                'draft': 'Черновик',
+                'pending': 'На модерации',
+                'approved': 'Одобрено',
+                'published': 'Опубликовано',
+                'in_progress': 'В работе',
+                'completed': 'Выполнено',
+                'cancelled': 'Отменено',
+                'urgent': 'Срочное'
+            } %}
+            {{ status_labels.get(task.status, task.status) }}
+        </span>
+    </div>
+
+    <div class="grid grid-4" style="margin-bottom: 16px;">
+        <div class="card-detail">
+            <span>📍</span>
+            <span>{{ task.location }}</span>
+        </div>
+        <div class="card-detail">
+            <span>📅</span>
+            <span>{{ task.start_datetime | format_datetime }}</span>
+        </div>
+        <div class="card-detail">
+            <span>⏰</span>
+            <span>{{ task.duration_hours }} часов</span>
+        </div>
+        <div class="card-detail">
+            <span>💰</span>
+            <span style="font-weight: 600;">{{ task.client_price | format_currency }}</span>
+        </div>
+    </div>
+
+    {% if task.requirements %}
+    <div style="margin-bottom: 16px;">
+        <strong style="font-size: 0.875rem; color: #374151;">Требования:</strong>
+        <div style="margin-top: 4px;">
+            {% for req in task.requirements %}
+            <span style="display: inline-block; margin: 2px 8px 2px 0; padding: 2px 8px; background-color: #f3f4f6; border-radius: 4px; font-size: 0.75rem; color: #374151;">
+                {{ req.count }} 
+                {% if req.worker_type == 'loader' %}грузчик{% elif req.worker_type == 'driver' %}водитель{% elif req.worker_type == 'rigger' %}такелажник{% elif req.worker_type == 'cleaner' %}уборщик{% else %}разнорабочий{% endif %}
+            </span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="card-description">
+        {{ task.description }}
+    </div>
+
+    <div style="margin-top: 16px; display: flex; gap: 8px; font-size: 0.75rem; color: #9ca3af;">
+        <span>ID: {{ task.id }}</span>
+        <span>•</span>
+        <span>Создано: {{ task.created_at | format_date }}</span>
+        <span>•</span>
+        <span>Откликов: {{ task.applications_count }}</span>
+    </div>
+</div>
+{% endfor %}
+
+{% else %}
+<div class="empty-state">
+    <div class="empty-state-icon">📋</div>
+    <h3>Заданий не найдено</h3>
+    <p>
+        {% if current_filter and current_filter != 'all' %}
+            Нет заданий со статусом "{{ current_filter }}"
+        {% else %}
+            В системе пока нет заданий
+        {% endif %}
+    </p>
+</div>
+{% endif %}
+{% endblock %}
