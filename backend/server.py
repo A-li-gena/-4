@@ -618,14 +618,16 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return MAIN_MENU
 
 async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    if text == "👤 Профиль":
+    text = (update.message.text or "").strip()
+    low = text.lower()
+    # Normalize: accept variants without emoji
+    if text == "👤 Профиль" or "профиль" in low or low == "profile":
         return await show_profile(update, context)
-    if text == "➕ Создать задание":
+    if text == "➕ Создать задание" or "создать" in low or "новое задание" in low:
         context.user_data.clear()
         await update.message.reply_text("Введите название задания:")
         return TASK_TITLE
-    if text == "📋 Мои задания":
+    if text == "📋 Мои задания" or "мои задания" in low:
         user = await user_by_tg_chat(update.effective_chat.id)
         if not user:
             await update.message.reply_text("❌ Пользователь не найден")
@@ -645,6 +647,8 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg += f"• {t['title']} — {t.get('status', 'draft')} — {t.get('client_price', 0)}₽\n"
         await update.message.reply_text(msg)
         return MAIN_MENU
+    if low in {"start", "/start"}:
+        return await cmd_start(update, context)
     # Fallback
     await update.message.reply_text(
         "Пожалуйста, выберите действие из меню:",
