@@ -156,17 +156,15 @@ backend:
     file: "server.py, requirements.txt"
     stuck_count: 0
     priority: "high"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
       - working: false
         agent: "user"
-        comment: "User reported 'Conflict: terminated by other getUpdates request; make sure that only one bot instance is running' error when starting server with uvicorn"
+        comment: "При запуске в Python 3.13: Updater.start_polling() got an unexpected keyword argument 'read_timeout'"
       - working: true
         agent: "main"
-        comment: "Fixed Telegram bot polling conflicts by: 1) Added httpx dependency to requirements.txt, 2) Implemented retry logic with exponential backoff, 3) Added proper error handling and logging, 4) Added webhook cleanup before polling, 5) Improved shutdown process. Server now starts successfully even with conflicts and continues operating normally."
-      - working: true
-        agent: "testing"
-        comment: "VERIFIED: Server starts successfully with exact command 'uvicorn server:app --host 0.0.0.0 --port 8001 --reload'. All API endpoints (/api/health, /api/users, /api/tasks, /api/reminders, /api/stats/summary) work perfectly during operation. Database operations successful (created test task). Telegram conflicts detected in logs but handled gracefully without affecting server functionality. Graceful shutdown works properly. Fix is working as intended."
+        comment: "Исправлено: удалены неподдерживаемые параметры read_timeout/connect_timeout у updater.start_polling для p-t-b v21, добавлены проверки и стабильный запуск. Требуется повторное тестирование."
+
 
   - task: "API endpoints functionality"
     implemented: true
