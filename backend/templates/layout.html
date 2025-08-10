@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="app-container">
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h2>Workers System</h2>
+            <p class="sidebar-subtitle">Админ панель</p>
+        </div>
+        
+        <nav class="sidebar-nav">
+            <ul>
+                <li>
+                    <a href="/" class="nav-link {% if request.url.path == '/' %}active{% endif %}">
+                        <span class="nav-icon">📊</span>
+                        Дашборд
+                    </a>
+                </li>
+                <li>
+                    <a href="/orders" class="nav-link {% if request.url.path == '/orders' %}active{% endif %}">
+                        <span class="nav-icon">📋</span>
+                        Задания
+                    </a>
+                </li>
+                <li>
+                    <a href="/moderation" class="nav-link {% if request.url.path == '/moderation' %}active{% endif %}">
+                        <span class="nav-icon">🔍</span>
+                        Модерация
+                    </a>
+                </li>
+                <li>
+                    <a href="/users" class="nav-link {% if request.url.path == '/users' %}active{% endif %}">
+                        <span class="nav-icon">👥</span>
+                        Пользователи
+                    </a>
+                </li>
+                <li>
+                    <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">
+                        <span class="nav-icon">⚙️</span>
+                        Настройки
+                    </a>
+                </li>
+            </ul>
+        </nav>
+    </div>
+
+    <!-- Main content -->
+    <div class="main-content">
+        <main class="content">
+            {% block page_content %}{% endblock %}
+        </main>
+    </div>
+</div>
+{% endblock %}
