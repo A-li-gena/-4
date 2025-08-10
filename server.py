@@ -370,7 +370,8 @@ async def update_task(task_id: str, payload: TaskUpdate, col: AsyncIOMotorCollec
 
     update_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
     
-    res = await col.find_one_and_update({"id": task_id}, {"$set": update_fields}, return_document=True)
+    from pymongo import ReturnDocument
+    res = await col.find_one_and_update({"id": task_id}, {"$set": update_fields}, return_document=ReturnDocument.AFTER)
     if not res:
         await col.update_one({"id": task_id}, {"$set": update_fields})
         res = await col.find_one({"id": task_id})
