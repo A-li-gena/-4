@@ -1,1 +1,29 @@
-{}
+{
+  "c78f91d39d5f4873a21d7610ddb00a2e": {
+    "id": "c78f91d39d5f4873a21d7610ddb00a2e",
+    "title": "Перевозка мебели",
+    "description": "Нужно перенести 3 шкафа",
+    "task_type": "loading",
+    "requirements": [
+      {
+        "worker_type": "loader",
+        "count": 2,
+        "hourly_rate": null
+      }
+    ],
+    "location": "Москва, центр",
+    "metro_station": null,
+    "start_datetime": "2025-03-01T09:00:00+00:00",
+    "duration_hours": 6,
+    "client_price": 5000.0,
+    "worker_price": null,
+    "verified_only": false,
+    "additional_info": null,
+    "status": "approved",
+    "client_id": "test-client-123",
+    "assigned_workers": [],
+    "applications_count": 0,
+    "created_at": "2025-08-10T22:46:03.211982+00:00",
+    "updated_at": "2025-08-10T22:46:03.339271+00:00"
+  }
+}
