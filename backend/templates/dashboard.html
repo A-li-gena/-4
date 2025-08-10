@@ -1,90 +1,25 @@
-{% extends "layout.html" %}
-
-{% block title %}Дашборд - Workers System{% endblock %}
-
-{% block page_content %}
-<div class="page-header">
-    <div>
-        <h1 class="page-title">Дашборд</h1>
-        <p class="page-subtitle">Обзор системы работников</p>
+<![CDATA[{% extends 'base.html' %}
+{% block content %}
+  <h1 class="title">Сводка</h1>
+  <div class="grid grid-3">
+    <div class="card">
+      <div class="muted">Всего заданий</div>
+      <div style="font-size:28px; font-weight:800;">{{ stats.total_tasks or 0 }}</div>
     </div>
-</div>
-
-<!-- Stats Grid -->
-<div class="stats-grid">
-    <div class="stat-card">
-        <div class="stat-card-content">
-            <div>
-                <p class="stat-card-title">Всего заданий</p>
-                <p class="stat-card-value">{{ stats.total_tasks or 0 }}</p>
-            </div>
-            <div class="stat-card-icon" style="color: #3b82f6;">📋</div>
-        </div>
+    <div class="card">
+      <div class="muted">Выручка</div>
+      <div style="font-size:28px; font-weight:800;">{{ (stats.total_revenue or 0) | format_currency }}</div>
     </div>
-    
-    <div class="stat-card">
-        <div class="stat-card-content">
-            <div>
-                <p class="stat-card-title">Общий доход</p>
-                <p class="stat-card-value">{{ (stats.total_revenue or 0) | format_currency }}</p>
-            </div>
-            <div class="stat-card-icon" style="color: #10b981;">💰</div>
-        </div>
+    <div class="card">
+      <div class="muted">Пользователи</div>
+      <div style="font-size:28px; font-weight:800;">{{ stats.total_users or 0 }}</div>
     </div>
-    
-    <div class="stat-card">
-        <div class="stat-card-content">
-            <div>
-                <p class="stat-card-title">Всего пользователей</p>
-                <p class="stat-card-value">{{ stats.total_users or 0 }}</p>
-            </div>
-            <div class="stat-card-icon" style="color: #f59e0b;">👥</div>
-        </div>
-    </div>
-    
-    <div class="stat-card">
-        <div class="stat-card-content">
-            <div>
-                <p class="stat-card-title">Исполнители</p>
-                <p class="stat-card-value">{{ stats.workers_count or 0 }}</p>
-            </div>
-            <div class="stat-card-icon" style="color: #8b5cf6;">🔧</div>
-        </div>
-    </div>
-</div>
-
-<!-- Status Breakdown -->
-{% if stats.by_status %}
-<div class="card">
-    <h2 style="margin: 0 0 24px 0; font-size: 1.25rem; font-weight: bold; color: #1f2937;">
-        Статусы заданий
-    </h2>
-    
-    <div class="grid grid-4">
-        {% for status, count in stats.by_status.items() %}
-        {% set status_info = {
-            'draft': {'label': 'Черновики', 'color': '#6b7280'},
-            'pending': {'label': 'На модерации', 'color': '#f59e0b'},
-            'approved': {'label': 'Одобрены', 'color': '#3b82f6'},
-            'published': {'label': 'Опубликованы', 'color': '#10b981'},
-            'in_progress': {'label': 'В работе', 'color': '#8b5cf6'},
-            'completed': {'label': 'Выполнены', 'color': '#059669'},
-            'cancelled': {'label': 'Отменены', 'color': '#ef4444'},
-            'urgent': {'label': 'Срочные', 'color': '#dc2626'}
-        }.get(status, {'label': status, 'color': '#6b7280'}) %}
-        
-        <div style="padding: 16px; border-radius: 6px; background-color: #f9fafb; border: 2px solid {{ status_info.color }}20;">
-            <div style="display: flex; align-items: center; justify-content: space-between;">
-                <span style="font-size: 0.875rem; color: #6b7280;">
-                    {{ status_info.label }}
-                </span>
-                <span style="font-size: 1.25rem; font-weight: bold; color: {{ status_info.color }};">
-                    {{ count }}
-                </span>
-            </div>
-        </div>
-        {% endfor %}
-    </div>
-</div>
-{% endif %}
-{% endblock %}
+  </div>
+  <div style="height:16px;"></div>
+  <div class="card">
+    <div class="muted" style="margin-bottom:8px;">По статусам</div>
+    {% for k,v in (stats.by_status or {}).items() %}
+      <span class="badge">{{ k }}: {{ v }}</span>
+    {% endfor %}
+  </div>
+{% endblock %}]]>

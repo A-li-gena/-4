@@ -1,0 +1,15 @@
+/* Простой тёмный стиль без JS */
+*{box-sizing:border-box}
+body{background:#0b1220;color:#e6e9f0;font-family:Inter,Arial,sans-serif;margin:0}
+.container{max-width:1100px;margin:0 auto;padding:16px}
+nav a{display:inline-block;margin-right:14px;padding:8px 12px;border-radius:8px;background:#121a2b;border:1px solid #1f2a44}
+nav a:hover{background:#0e1627}
+.card{background:#121a2b;border:1px solid #1f2a44;border-radius:10px;padding:16px}
+.grid{display:grid;gap:16px}
+.grid-3{grid-template-columns:repeat(3,1fr)}
+.badge{display:inline-block;padding:4px 10px;border-radius:999px;background:#1f2a44;margin:2px 6px 2px 0}
+.muted{color:#a0a7b7;font-size:14px}
+.title{font-size:24px;font-weight:800;margin:0 0 8px}
+.table{width:100%;border-collapse:collapse}
+.table th,.table td{padding:10px;border-bottom:1px solid #1f2a44;text-align:left}
+.table th{color:#a0a7b7;font-weight:600}

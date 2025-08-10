@@ -9,8 +9,11 @@ import json
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
-from fastapi import FastAPI, APIRouter, HTTPException, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from enum import Enum
 
@@ -69,8 +72,8 @@ USERS_FILE = os.path.join(DATA_DIR, "users.json")
 TASKS_FILE = os.path.join(DATA_DIR, "tasks.json")
 REMINDERS_FILE = os.path.join(DATA_DIR, "reminders.json")
 
-# FastAPI app (только API для здоровья/ CRUD, без HTML)
-app = FastAPI(title="Workers Telegram Bot Backend (No HTML)")
+# FastAPI app with simple server-side HTML (no JS needed)
+app = FastAPI(title="Workers Telegram Bot Backend (Server-rendered UI)")
 
 # CORS
 app.add_middleware(
@@ -80,6 +83,47 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Templates and Static (pure Python server-rendered UI)
+TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+os.makedirs(TEMPLATES_DIR, exist_ok=True)
+os.makedirs(STATIC_DIR, exist_ok=True)
+
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+# Template filters
+
+def format_currency(amount):
+    if amount is None:
+        return "0 ₽"
+    try:
+        return f"{int(amount):,} ₽".replace(",", " ")
+    except Exception:
+        return f"{amount} ₽"
+
+def format_datetime(date_str):
+    if not date_str:
+        return ""
+    try:
+        dt = datetime.fromisoformat(str(date_str).replace('Z', '+00:00'))
+        return dt.strftime('%d.%m.%Y %H:%M')
+    except Exception:
+        return str(date_str)
+
+def format_date(date_str):
+    if not date_str:
+        return ""
+    try:
+        dt = datetime.fromisoformat(str(date_str).replace('Z', '+00:00'))
+        return dt.strftime('%d.%m.%Y')
+    except Exception:
+        return str(date_str)
+
+templates.env.filters["format_currency"] = format_currency
+templates.env.filters["format_datetime"] = format_datetime
+templates.env.filters["format_date"] = format_date
 
 # API router (all routes must be under /api)
 api = APIRouter(prefix="/api")
@@ -130,7 +174,7 @@ class JsonStorage:
     async def delete(self, doc_id: str):
         async with self._lock:
             if doc_id in self._data:
-                del self._data[doc_id]
+                del self._data
                 await self._save_internal()
 
     async def find_many(self, filter_fn=None) -> List[Dict[str, Any]]:
@@ -412,6 +456,37 @@ async def stats_summary():
 app.include_router(api)
 
 # -----------------------------
+# Simple Server-rendered HTML (no JS) to inspect data locally
+# -----------------------------
+@app.get("/favicon.ico")
+async def favicon():
+    return Response(status_code=204)
+
+@app.get("/", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    stats = await stats_summary()
+    return templates.TemplateResponse("dashboard.html", {"request": request, "stats": stats})
+
+@app.get("/orders", response_class=HTMLResponse)
+async def orders_page(request: Request, status: Optional[str] = None):
+    tasks: List[TaskOut] = await list_tasks_api(100, 0, TaskStatus(status) if status else None, None, None)  # type: ignore
+    return templates.TemplateResponse("orders.html", {"request": request, "tasks": tasks, "current_filter": status})
+
+@app.get("/users", response_class=HTMLResponse)
+async def users_page(request: Request, role: Optional[str] = None):
+    users: List[UserOut] = await list_users_api(100, 0, UserRole(role) if role else None)  # type: ignore
+    return templates.TemplateResponse("users.html", {"request": request, "users": users, "current_filter": role})
+
+@app.get("/moderation", response_class=HTMLResponse)
+async def moderation_page(request: Request):
+    tasks: List[TaskOut] = await list_tasks_api(100, 0, TaskStatus.PENDING, None, None)  # type: ignore
+    return templates.TemplateResponse("moderation.html", {"request": request, "tasks": tasks})
+
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    return templates.TemplateResponse("settings.html", {"request": request})
+
+# -----------------------------
 # Telegram Bot Handlers (Start, Profile, Create Task Conversation)
 # -----------------------------
 MAIN_MENU, TASK_TITLE, TASK_DESC, TASK_LOCATION, TASK_DATETIME, TASK_DURATION, TASK_PRICE = range(7)
@@ -425,7 +500,8 @@ MAIN_KEYBOARD = [
 async def ensure_user(update: Update, default_role: UserRole = UserRole.WORKER) -> Optional[str]:
     user = update.effective_user
     chat_id = update.effective_chat.id
-    existing = await user_by_tg_chat(chat_id)
+    users = await users_store.find_many(lambda u: u.get("tg_chat_id") == chat_id)
+    existing = users[0] if users else None
     if existing:
         existing.update({
             "username": user.username,
@@ -462,7 +538,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    user = await user_by_tg_chat(chat_id)
+    users = await users_store.find_many(lambda u: u.get("tg_chat_id") == chat_id)
+    user = users[0] if users else None
     if not user:
         await update.message.reply_text("❌ Профиль не найден")
         return MAIN_MENU
@@ -499,7 +576,8 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Введите название задания:")
         return TASK_TITLE
     if text == "📋 Мои задания" or "мои задания" in low:
-        user = await user_by_tg_chat(update.effective_chat.id)
+        users = await users_store.find_many(lambda u: u.get("tg_chat_id") == update.effective_chat.id)
+        user = users[0] if users else None
         if not user:
             await update.message.reply_text("❌ Пользователь не найден")
             return MAIN_MENU
@@ -583,7 +661,8 @@ async def handle_task_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Введите положительное число, например 5000")
         return TASK_PRICE
 
-    user = await user_by_tg_chat(update.effective_chat.id)
+    users = await users_store.find_many(lambda u: u.get("tg_chat_id") == update.effective_chat.id)
+    user = users[0] if users else None
     if not user:
         await update.message.reply_text("❌ Пользователь не найден")
         return MAIN_MENU
@@ -633,7 +712,7 @@ async def on_startup():
     await users_store.load()
     await tasks_store.load()
     await reminders_store.load()
-    logger.info("✅ JSON storage initialized (No HTML mode)")
+    logger.info("✅ JSON storage initialized (Server-rendered UI)")
 
     if TELEGRAM_BOT_TOKEN:
         try:
@@ -657,7 +736,7 @@ async def on_startup():
 
             await telegram_app.initialize()
             await telegram_app.start()
-            logger.info("🤖 Telegram bot initialized (polling, no HTML)")
+            logger.info("🤖 Telegram bot initialized (polling)")
         except Exception as e:
             logger.error(f"Telegram bot init failed: {e}")
 
